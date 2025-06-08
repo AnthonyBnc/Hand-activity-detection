@@ -8,7 +8,7 @@ def count_defects(contour, hull):
         return 0
     return defects.shape[0]
 
-# Track hand center for waving detection
+# Motion history to detect waving
 motion_history = deque(maxlen=10)
 
 # Start webcam
@@ -19,65 +19,62 @@ while True:
     if not ret:
         break
 
-    # Flip to mirror view
     frame = cv2.flip(frame, 1)
-    roi = frame[100:400, 100:400]  # Region of interest
+    hand_state = "No hand detected"
 
-    # Convert to grayscale and blur
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (35, 35), 0)
+    # Convert to HSV color space for skin detection
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-    # Threshold image
-    _, thresh = cv2.threshold(blurred, 0, 255,
-                              cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    # Skin color range (adjust as needed)
+    lower_skin = np.array([0, 20, 70], dtype=np.uint8)
+    upper_skin = np.array([20, 255, 255], dtype=np.uint8)
 
-    contours, _ = cv2.findContours(thresh.copy(),
-                                   cv2.RETR_TREE,
-                                   cv2.CHAIN_APPROX_SIMPLE)
+    # Create skin mask
+    mask = cv2.inRange(hsv, lower_skin, upper_skin)
+    mask = cv2.GaussianBlur(mask, (5, 5), 0)
+
+    # Find contours on the mask
+    contours, _ = cv2.findContours(mask.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
     if contours:
         max_contour = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(max_contour)
 
-        if cv2.contourArea(max_contour) > 3000:
+        if area > 3000:
+            # Get bounding box for red box
+            x, y, w, h = cv2.boundingRect(max_contour)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
+
+            # Detect gesture based on convexity
             hull = cv2.convexHull(max_contour, returnPoints=False)
             defects_count = count_defects(max_contour, hull)
 
-            # Draw contour and hull
-            cv2.drawContours(roi, [max_contour], -1, (0, 255, 0), 2)
-
-            # Get center of contour for motion tracking
+            # Track center point of hand
             M = cv2.moments(max_contour)
             if M['m00'] != 0:
-                cx = int(M['m10']/M['m00'])
+                cx = int(M['m10'] / M['m00'])
                 motion_history.append(cx)
 
-                # Draw center
-                cv2.circle(roi, (cx, 200), 5, (255, 0, 0), -1)
-
-                # Check for waving gesture (motion side-to-side)
                 if len(motion_history) == motion_history.maxlen:
                     movement = max(motion_history) - min(motion_history)
                     if movement > 50:
-                        cv2.putText(frame, "👋 Waving", (50, 450),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
+                        hand_state = "👋 Waving"
+                    elif defects_count >= 4:
+                        hand_state = "🖐️ Open Hand"
+                    elif defects_count <= 1:
+                        hand_state = "✊ Fist"
+                    else:
+                        hand_state = "❓ Unknown Gesture"
 
-            # Classify gesture
-            if defects_count >= 4:
-                cv2.putText(frame, "🖐️ Open Hand", (50, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
-            elif defects_count <= 1:
-                cv2.putText(frame, "✊ Fist", (50, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
-            else:
-                cv2.putText(frame, "✋ Unknown Gesture", (50, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 0, 0), 3)
+            # Draw hand contour
+            cv2.drawContours(frame, [max_contour], -1, (0, 255, 0), 2)
 
-    # Draw region of interest box
-    cv2.rectangle(frame, (100, 100), (400, 400), (255, 255, 255), 2)
+    # Display the detected hand state
+    cv2.putText(frame, hand_state, (30, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
 
-    # Show output
-    cv2.imshow("Gesture Detection", frame)
-    cv2.imshow("Threshold", thresh)
+    # Show the result (just the main view)
+    cv2.imshow("Hand Gesture Detection", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
