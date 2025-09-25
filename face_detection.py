@@ -2,43 +2,77 @@ import face_recognition
 import cv2
 import os
 
+# Folder that contains your known faces (jpg/png files)
+KNOWN_FACES_DIR = "faces"
+
 known_encodings = []
 known_names = []
 
-for file in os.listdir('faces'):
-    path = os.path.join("faces", file)
+print("🔍 Loading known faces...")
+
+# Load all images from faces/ folder
+for filename in os.listdir(KNOWN_FACES_DIR):
+    path = os.path.join(KNOWN_FACES_DIR, filename)
+
+    # Only process image files
+    if not filename.lower().endswith((".jpg", ".jpeg", ".png")):
+        continue
+
+    # Load image
     image = face_recognition.load_image_file(path)
-    encs = face_recognition.face_encodings(image)
-    if encs: 
-        known_encodings.append(encs[0])
-        known_names.append(os.path.splitext(file)[0])
 
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    # Detect face(s) in the image
+    face_locations = face_recognition.face_locations(image)
+    encodings = face_recognition.face_encodings(image, face_locations)
 
+    if encodings:
+        known_encodings.append(encodings[0])
+        # Use filename (without extension) as the label
+        name = os.path.splitext(filename)[0]
+        known_names.append(name)
+        print(f"✅ Loaded {name}")
+    else:
+        print(f"⚠️ No face found in {filename}, skipping...")
+
+print("✅ All known faces loaded.")
+
+# Start webcam
 cap = cv2.VideoCapture(0)
 
-while True: 
+print("🎥 Starting webcam. Press 'q' to quit.")
+
+while True:
     ret, frame = cap.read()
     if not ret:
-        break 
+        break
 
-    rgb = frame[:, :, ::-1]
-    face_locations = face_recognition.face_locations(rgb)
-    face_encodings = face_recognition.face_encodings(rgb, face_locations)
+    # Convert to RGB (face_recognition uses RGB, OpenCV uses BGR)
+    rgb_frame = frame[:, :, ::-1]
 
-    for (top, right, bottom, left), encoding in zip(face_locations, face_encodings):
-        matches = face_recognition.compare_faces(known_encodings, encoding, tolerance=0.5)
+    # Find all faces in the frame
+    face_locations = face_recognition.face_locations(rgb_frame)
+    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+
+    for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+        # Compare face with known faces
+        matches = face_recognition.compare_faces(known_encodings, face_encoding, tolerance=0.5)
+
         name = "Unknown"
-        if True in matches: 
-            idx = matches.index(True)
-            name = known_names[idx]
-        
-        cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
-        cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        if True in matches:
+            match_index = matches.index(True)
+            name = known_names[match_index]
 
-    cv2.imshow('Face Detection', frame)
+        # Draw box around face
+        cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+        # Label with name
+        cv2.putText(frame, name, (left, top - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    # Show video feed
+    cv2.imshow("Face Recognition", frame)
+
+    # Quit on 'q' key
+    if cv2.waitKey(1) & 0xFF == ord("q"):
         break
 
 cap.release()
